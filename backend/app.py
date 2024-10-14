@@ -124,7 +124,16 @@ async def websocket_endpoint(websocket: WebSocket):
             yield types.StreamingRecognizeRequest(streaming_config=streaming_config)
             try:
                 while True:
-                    data = await websocket.receive_bytes()
+                    try:
+                        data = await asyncio.wait_for(websocket.receive_bytes(), timeout=5)
+                    except asyncio.TimeoutError:
+                        logger.warning("No audio data received for 5 seconds.")
+                        # 必要に応じて無音データを送信
+                        silent_data = b'\x00' * 3200  # 0.1秒分の無音データ（16kHz, 16bit）
+                        audio_buffer.extend(silent_data)
+                        yield types.StreamingRecognizeRequest(audio_content=silent_data)
+                        continue
+
                     logger.debug(f"Received audio data of size: {len(data)} bytes")
 
                     # 音声データをバッファに追加
@@ -188,6 +197,7 @@ async def transcribe_audio(audio_data: bytes) -> str:
             model="whisper-1",
             file=wav_file,
             language="ja",
+            prompt="あなたは、議事録担当です。誰が話したかを（）で示しながら文字起こしをしてください。不明の場合は、不明と明記してください。"
         )
         return response.text
     except Exception as e:
